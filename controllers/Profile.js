@@ -1,24 +1,34 @@
 const accountDeletionSuccessTemplate = require("../mail/templates/AccountDeleted");
 const Profile = require("../models/Profile");
 const User = require("../models/User");
-const { imageUploadToCloudinary } = require("../utils/imageUploader");
+const {
+  imageUploadToCloudinary,
+  imageAndVideoDeleteFromCloudinary,
+} = require("../utils/imageUploader");
 const mailSender = require("../utils/mailSender");
 exports.updateProfile = async (req, res) => {
   try {
     // get data from request ki body
-
-    const { dateOfBirth = "", about = "", gender, contactNumber } = req.body;
+    console.log(req.body);
+    const {
+      firstName,
+      lastName = "",
+      dateOfBirth = "",
+      gender,
+      contactNumber = "",
+      about = "",
+    } = req.body;
     // get user Id from JWT decode wali jagah se
     const userId = req.user.id;
-    // validate kr lo jo bhi aya hai sahi hai ya nahi
-    if (!contactNumber || !gender) {
-      return res.status(400).json({
-        success: false,
-        message: "ContactNumber and Gender cannot be empty",
-      });
-    }
     // user ko find karo DB se
-    const userDetails = await User.findById(userId);
+    const userDetails = await User.findByIdAndUpdate(
+      userId,
+      {
+        firstName: firstName,
+        lastName: lastName,
+      },
+      { new: true }
+    );
     const profileId = userDetails.additionalDetails;
 
     const profileDetails = await Profile.findById(profileId);
@@ -29,12 +39,14 @@ exports.updateProfile = async (req, res) => {
     profileDetails.dateOfBirth = dateOfBirth;
 
     await profileDetails.save();
-
+    const newUserData = await User.findById(userId)
+      .populate("additionalDetails")
+      .exec();
     // response return
     return res.status(200).json({
       success: true,
       message: "Profile Updated Successfully",
-      data: profileDetails,
+      data: newUserData,
     });
   } catch (error) {
     console.log("Error while updating Profile", error);
@@ -63,7 +75,11 @@ exports.deleteAccount = async (req, res) => {
 
     await User.findByIdAndDelete(userId);
     // Account deletion mail
-    await mailSender(userDetails.email, "Account Deletion Confirmation Mail", accountDeletionSuccessTemplate(userDetails.firstName));
+    await mailSender(
+      userDetails.email,
+      "Account Deletion Confirmation Mail",
+      accountDeletionSuccessTemplate(userDetails.firstName)
+    );
     // Fir user ki detail bhi detail
     return res.status(200).json({
       success: true,
@@ -115,6 +131,7 @@ exports.updateUserImage = async (req, res) => {
     const newUserImage = req.files.newUserImage;
     // get user id from request user ki id se
     const userId = req.user.id;
+    console.log(userId);
     // upload kro cloudinary pe height and quality daal ke
     const userDetails = await User.findById(userId);
     if (!userDetails) {
@@ -140,7 +157,9 @@ exports.updateUserImage = async (req, res) => {
       {
         new: true,
       }
-    );
+    )
+      .populate("additionalDetails")
+      .exec();
     // return response
 
     return res.status(200).json({
@@ -184,6 +203,39 @@ exports.getEnrolledCourses = async (req, res) => {
       success: false,
       message:
         "Failed to get Enrolled courses of the student, Please Try Again",
+    });
+  }
+};
+
+exports.onImageRemove = async (req, res) => {
+  try {
+    // User ki id nikalenge jo bhi JWT se set kri hai hamne or usko decode kra hai
+    const userId = req.user.id;
+    // user nikalenge database me se
+    const { firstName, lastName, imagePublicId } = await User.findById(userId);
+    // cloudinary pe uski image remove kr denge
+    const imageDeleted = await imageAndVideoDeleteFromCloudinary(imagePublicId);
+    console.log(imageDeleted);
+    // user ke naam se dicebear ki image daal denge
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      {
+        image: `https://api.dicebear.com/5.x/initials/svg?seed=${firstName} ${lastName}`,
+        imagePublicId: null,
+      },
+      { new: true }
+    );
+    // response return kr denge
+    return res.status(200).json({
+      success: true,
+      message: "User Image removed successfully",
+      data: updatedUser,
+    });
+  } catch (error) {
+    console.log("Error while deleting image of user", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to remove the image",
     });
   }
 };
